@@ -22,7 +22,7 @@ The **Foster DoS Attack Tool** is an advanced penetration testing tool developed
 
 1. **Clone the repository**:
    ```bash
-   git clone https://github.com/Lucifer-0217/foster-dos-tool.git
+   git clone https://github.com/Lucifer-0217/Foster.git
    ```
 
 2. **Install dependencies**:
