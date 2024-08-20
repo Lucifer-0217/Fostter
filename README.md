@@ -18,7 +18,7 @@ The **Foster DoS Attack Tool** is an advanced penetration testing tool developed
 
 1. **Clone the repository**:
    ```bash
-   git clone https://github.com/Lucifer-0217/Foster.git
+  https://github.com/Lucifer-0217/Fostter.git
    ```
 
 2. **Install dependencies**:
@@ -30,14 +30,42 @@ The **Foster DoS Attack Tool** is an advanced penetration testing tool developed
 3. **Run the tool**:
    Execute the following command:
    ```bash
-   python foster_dos.py --target [TARGET_IP] --port [TARGET_PORT] --protocol [PROTOCOL]
+   python foster.py --target [TARGET_IP] --port [TARGET_PORT] --protocol [PROTOCOL]
    ```
 
 ## Usage
 
-```bash
-python foster_dos.py --target 192.168.1.100 --port 80 --protocol HTTP
-```
+The following commands are available to test the tool against a target:
+
+### 1. **Basic HTTP Flood Test**:
+   ```bash
+   python foster.py -u https://example.com -T 10 -s 150
+   ```
+   - **Description**: Initiates an HTTP flood attack with 10 threads and 150 sockets.
+
+### 2. **Custom Headers HTTP Flood Test**:
+   ```bash
+   python foster.py -u https://example.com -T 10 -s 150 -H "Custom-Header: Value,Another-Header: AnotherValue"
+   ```
+   - **Description**: Adds custom headers to the requests while launching the attack.
+
+### 3. **Random User-Agent HTTP Flood Test**:
+   ```bash
+   python foster.py -u https://example.com -T 10 -s 150 -ua
+   ```
+   - **Description**: Randomizes the User-Agent for each request sent during the attack.
+
+### 4. **HTTPS Test with Proxy**:
+   ```bash
+   python foster.py -u https://example.com -T 10 -s 150 -x --proxy-host 127.0.0.1 --proxy-port 8080 --https
+   ```
+   - **Description**: Uses a SOCKS5 proxy and sends the requests over HTTPS.
+
+### 5. **Verbose Mode Test**:
+   ```bash
+   python foster.py -u https://example.com -T 10 -s 150 -v
+   ```
+   - **Description**: Enables verbose logging to show detailed output.
 
 ### Command-Line Options:
 - `--target`: IP or domain of the target system.
@@ -46,13 +74,23 @@ python foster_dos.py --target 192.168.1.100 --port 80 --protocol HTTP
 - `--threads`: Number of concurrent threads (default: 10).
 - `--duration`: Attack duration in seconds (default: 60).
 - `--payload`: Optional custom payload.
+- `-u`: Target URL for HTTP flood.
+- `-T`: Number of threads to use.
+- `-s`: Number of sockets to use.
+- `-H`: Comma-separated list of custom headers.
+- `-ua`: Randomizes user-agents with each request.
+- `-x`: Use a SOCKS5 proxy for connecting.
+- `--proxy-host`: SOCKS5 proxy host.
+- `--proxy-port`: SOCKS5 proxy port.
+- `--https`: Use HTTPS for the requests.
+- `-v`: Enable verbose logging.
 
 ### Example:
 
 To initiate an HTTP flood attack on `192.168.1.100` over port 80 with 50 threads for 120 seconds:
 
 ```bash
-python foster_dos.py --target 192.168.1.100 --port 80 --protocol HTTP --threads 50 --duration 120
+python foster.py --target 192.168.1.100 --port 80 --protocol HTTP --threads 50 --duration 120
 ```
 
 ## Contributing
@@ -73,6 +111,3 @@ This project is licensed under the MIT License. See the [LICENSE](LICENSE) file 
 
 Ensure that you use this tool in a legal and ethical manner. Always obtain proper authorization before performing tests. The creators are not liable for any damage caused by the misuse of this tool.
 
----
-
-You can adjust the URL in the clone command and make any other changes specific to your tool or repository.
