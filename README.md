@@ -18,7 +18,7 @@ The **Foster DoS Attack Tool** is an advanced penetration testing tool developed
 
 1. **Clone the repository**:
    ```bash
-  https://github.com/Lucifer-0217/Fostter.git
+   https://github.com/Lucifer-0217/Fostter.git
    ```
 
 2. **Install dependencies**:
