@@ -1,7 +1,3 @@
-Here is a sample `README.md` file for your "Foster DoS Attack Tool":
-
----
-
 # Foster DoS Attack Tool
 
 ## Description
