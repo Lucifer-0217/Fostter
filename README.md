@@ -2,7 +2,7 @@
 
 ## Description
 
-The **Foster DoS Attack Tool** is an advanced penetration testing tool developed to simulate Denial of Service (DoS) attacks. It enables security professionals to assess the resilience of their systems by safely launching controlled DoS attacks. This tool is particularly useful for identifying potential vulnerabilities under stress.
+The **Foster DoS Attack Tool** is an advanced penetration testing tool developed Amit Kasbe to simulate Denial of Service (DoS) attacks. It enables security professionals to assess the resilience of their systems by safely launching controlled DoS attacks. This tool is particularly useful for identifying potential vulnerabilities under stress.
 
 > **Disclaimer:** This tool is strictly for educational purposes and legal penetration testing. Unauthorized use is illegal and unethical. The authors are not responsible for any misuse.
 
