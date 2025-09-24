@@ -1,299 +1,422 @@
 # SS7/SIGTRAN Bridge with Trinetra Integration
 
-*A complete, enterprise‑grade README with configuration, testing, security, scaling and diagrams (Mermaid & ASCII) — ready for GitHub.*
-
----
-
-**Note:** This document contains multiple Mermaid diagrams which render on GitHub and many Markdown viewers. For PNG exports, see the **"Exporting diagrams"** section near the end.
+> **Enterprise-grade README** — now fully aligned with the Trinetra project. This document includes full installation, hardened configuration, in-depth protocol explanations, Trinetra integration details, sample configs, testing plans, security & compliance, and multiple diagrams (Mermaid + ASCII). Ready to drop into a Git repository.
 
 ---
 
 ## Table of Contents
 
-1. Introduction
-2. Background: SS7, SIGTRAN & Trinetra
-3. System Requirements
-4. Quick Install (commands)
-5. Full Installation (step-by-step)
-6. Configuration — deep dive (OpenSS7, sigtran, Trinetra)
-7. Testing & Validation (tools, scenarios, pcap analysis)
-8. Scaling & Deployment Options (VMs, containers, multi-node)
-9. Security, Compliance & Logging
-10. Troubleshooting & Common Errors
-11. Maintenance & Upgrades
-12. File & Repo Structure
-13. Diagrams
-
-    * Architecture Diagram (Mermaid)
-    * Component Breakdown (Mermaid)
-    * Sequence Diagram: SS7 Message Flow (Mermaid)
-    * Deployment Topology (ASCII + Mermaid)
-14. Exporting diagrams to PNG/SVG
-15. References
-16. Legal Disclaimer
+1. Overview
+2. Trinetra — Project Context & Alignment
+3. Background: SS7 & SIGTRAN Essentials
+4. System Requirements & Host Prep
+5. Quick Install (commands)
+6. Full Installation & Build (OpenSS7 + Trinetra)
+7. Configuration — Deep Dive (files, parameters, examples)
+8. Integration: OpenSS7 ↔ Trinetra (detailed mapping)
+9. Testing & Validation (scenarios, tools, pcap examples)
+10. Advanced Usage: Replay, Anomaly Injection, Scale
+11. Security Hardening & Compliance Checklist
+12. Logging, Auditing & Forensics
+13. Troubleshooting Guide (diagnostics & fixes)
+14. File & Repo Layout (samples to commit)
+15. Diagrams (Mermaid + ASCII)
+16. Exporting Diagrams & Automation
+17. References & Useful Links
+18. Legal & Ethical Disclaimer
+19. Appendix: Sample Config Files
 
 ---
 
-## 1. Introduction
+## 1. Overview
 
-This repository documents how to build a **single-node SS7/SIGTRAN bridge** using **OpenSS7** on commodity hardware (Ryzen3 laptop recommended minimum) and integrate it with **Trinetra** for multi‑protocol analysis. The guide is meant for **lab/authorized testing** and *not* for connecting to live telco networks without permission.
+This README documents how to deploy a **single-node SS7/SIGTRAN bridge** (Signaling Gateway) on commodity hardware (e.g., Ryzen3 laptop) using **OpenSS7** and how to integrate it with **Trinetra** — a multi-protocol telecom interception and monitoring framework authored by Amit Kasbe.
 
----
+The goal: produce a **robust lab-grade bridge** that provides M3UA (SIGTRAN) endpoints for Trinetra to consume, supports virtual SS7 links for testing, and follows defense-in-depth security, auditability and maintainability best practices.
 
-## 2. Background: SS7, SIGTRAN & Trinetra
-
-* **SS7**: Legacy telephony signaling stack (MTP1-3, SCCP, ISUP, MAP etc.) used for call control, SMS, roaming and more.
-* **SIGTRAN**: Suite of protocols (M3UA, SUA, M2PA) to carry SS7 over IP using **SCTP**.
-* **Trinetra**: Multi-protocol telecom analysis & interception toolkit supporting SS7, Diameter, SIP, GTP, IMS, 5G NAS/NGAP and more.
-
-This repo links OpenSS7 as the SG (Signaling Gateway) and Trinetra as the collector/decoder.
+> Intended audience: telecom engineers, security researchers, national security teams, and developers building protocol decoders. Use only with explicit authorization.
 
 ---
 
-## 3. System Requirements
+## 2. Trinetra — Project Context & Alignment
 
-(See README front for quick table). Additions:
+Trinetra is a modular, Python-based interception framework containing:
 
-* **Kernel**: Prefer `linux-image-generic` latest (SCTP present). Verify with `/boot/config-$(uname -r)` for `CONFIG_SCTP=y`.
-* **Network**: Wired NIC with promiscuous mode support. If using VMs, configure macvlan or host networking for accurate packet flows.
+* `ss7_capture.py` — capture & pre-processing pipeline
+* `engine/protocol_engine.py` — plugin loader and dispatcher
+* `protocols/*` — decoders (ss7, diameter, gtp, ngap, nas5g, sip, ims, http2\_quic)
+* `replay.py` — lawful replay engine
+* `alerts.py`, `logger.py` — alerting & audit
+* `gui.py` / REST API — operator interface
+
+**How this README aligns with Trinetra:**
+
+* The bridge (OpenSS7) must expose **M3UA over SCTP** and optionally raw SS7 (virtual) links. Trinetra will connect as an M3UA Application Server (AS) / Application Server Process (ASP) to receive SS7 PDUs encoded in M3UA.
+* Configuration keys (`sg_ip`, `sg_port`, `routing_context`, `enabled_protocols`) are provided in the sample `config.json` (see Appendix).
 
 ---
 
-## 4. Quick Install (commands)
+## 3. Background: SS7 & SIGTRAN Essentials (concise)
+
+* **SS7 layers:** MTP1 (physical), MTP2, MTP3 (routing), SCCP (subsystem routing), ISUP (call control), MAP (mobile application part) and others.
+* **SIGTRAN:** transports SS7 over IP using SCTP. M3UA maps MTP3+ into IP-based messages and requires `routing_context`, `ASP/AS` states and point-code configuration.
+* **SCTP:** multi-homing, multi-stream transport; packets appear in Wireshark as `sctp` then `m3ua`.
+
+Understanding these core concepts is necessary before integrating OpenSS7 and Trinetra.
+
+---
+
+## 4. System Requirements & Host Prep
+
+Minimum:
+
+* CPU: Ryzen3 / Intel i3
+* RAM: 4GB (8GB recommended)
+* Disk: 50GB free (SSD recommended)
+* OS: Ubuntu 22.04 LTS / Debian stable (kernel with SCTP support)
+
+Recommended:
+
+* Dedicated NIC, wired Ethernet
+* Latest `linux-image-generic` kernel with `CONFIG_SCTP=y`
+
+Initial prep commands:
 
 ```bash
 sudo apt update && sudo apt upgrade -y
-sudo apt install -y build-essential git linux-headers-$(uname -r) libpcap-dev libsctp-dev python3 aptitude curl
+sudo apt install -y build-essential git autoconf automake libtool pkg-config \
+  linux-headers-$(uname -r) libpcap-dev libsctp-dev python3 python3-venv python3-pip \
+  tcpdump wireshark nmap sngrep jq
 sudo modprobe sctp
-git clone https://github.com/openss7/openss7.git
-cd openss7
+```
+
+Verify SCTP:
+
+```bash
+grep SCTP /boot/config-$(uname -r) || echo "Check kernel SCTP support"
+lsmod | grep sctp || sudo modprobe sctp
+```
+
+---
+
+## 5. Quick Install (Commands)
+
+Use this to bootstrap quickly in a trusted lab:
+
+```bash
+# System & deps
+sudo apt update && sudo apt upgrade -y
+sudo apt install -y build-essential git libsctp-dev libpcap-dev python3-venv
+sudo modprobe sctp
+
+# OpenSS7
+git clone https://github.com/openss7/openss7.git /opt/openss7
+cd /opt/openss7
 ./configure --enable-autotest --enable-silent-rules
 make -j$(nproc)
 sudo make install
-# configure /etc/openss7/* and Trinetra config.json as per docs
+
+# Trinetra
+git clone https://github.com/Lucifer-0217/Trinetra.git /opt/trinetra
+cd /opt/trinetra
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+
+# Run example (adjust IP/interface as needed)
+sudo python3 cli.py --interface eth0 --enable-alerts --output-format json
 ```
 
 ---
 
-## 5. Full Installation (step-by-step)
+## 6. Full Installation & Build (OpenSS7 + Trinetra)
 
-### 5.1 Kernel / Modules
+**OpenSS7**
 
-* Ensure SCTP present: `lsmod | grep sctp` or `modprobe sctp`.
-* If missing, install kernel headers and build SCTP module or use distro kernel with SCTP enabled.
+* Build prerequisites: `autoconf`, `automake`, `libtool`, `pkg-config`.
+* Configure with autotools; enable test harness.
 
-### 5.2 Packages
+**Trinetra**
 
-* Install compilers, dev libraries, packet libs and tcpdump/wireshark.
+* Create virtualenv, install dependencies from `requirements.txt`.
+* Ensure `capabilities` or root context for packet capture (e.g., `setcap cap_net_raw,cap_net_admin+ep $(which python3)` or run under sudo for CLI).
 
-### 5.3 Build OpenSS7
+Run-time expectations:
 
-* Clone and build as shown in Quick Install.
-* Run unit tests: `make check` (if provided). Enable `--enable-autotest` to include test harnesses.
-
-### 5.4 Install Trinetra
-
-* Trinetra is typically delivered as a binary/package or a Git repo. Place `config.json` in Trinetra config dir and ensure its listener IP/port match OpenSS7 `sigtran.cfg`.
+* OpenSS7 will register M3UA routes and listen on configured SCTP port (typically 2905).
+* Trinetra's `ss7_capture.py` or `cli.py` will open an SCTP socket (or regular socket + pcap) to the SG and decode incoming M3UA/SS7 PDUs.
 
 ---
 
-## 6. Configuration — Deep Dive
+## 7. Configuration — Deep Dive (files & examples)
 
-### 6.1 OpenSS7: `ss7.cfg` (parameter explanation)
+### Key config files in repo (recommended)
 
-* **opc** — Originating Point Code (3-octet/14-bit value depending on encoding). Choose unique local code.
-* **dpc** — Destination Point Code — the remote node’s point code.
-* **ni** — Network Indicator (0–3). Helps routing decisions (international/national).
-* **si** — Service Indicator (e.g., ISUP=5, SCCP=3). Determines upper-layer handling.
-* **linkset** — Named set of links; for lab use, a virtual linkset can be used.
+```
+/config/openss7/ss7.cfg
+/config/openss7/sigtran.cfg
+/config/trinetra/config.json
+```
 
-Example excerpt:
+### Example: `/config/openss7/ss7.cfg`
 
 ```ini
 [point_codes]
-opc=1
-dpc=2
-ni=2
+opc = 0x010000  ; local OPC (example) — use decimal/hex depending on tool
+dpc = 0x020000  ; remote DPC
+ni  = 2          ; network indicator (national)
 
 [linksets]
-ls1 = {
-  links = [ "loop0" ]
+# virtual linkset for lab
+lab_links = {
   type = virtual
+  links = [ "vlink0" ]
 }
 ```
 
-### 6.2 SIGTRAN: `sigtran.cfg` (parameter explanation)
+**Parameter notes:**
 
-* **local\_ip** — IP address of the SG (OpenSS7 host). Use fixed IP on chosen interface.
-* **remote\_ip** — IP address of Trinetra listener.
-* **local\_port / remote\_port** — Default 2905 for M3UA (confirm if changed).
-* **routing\_context** — 32-bit ID used by M3UA to identify particular routing contexts.
-* **asp\_id** — Application Server Process ID — uniquely identifies the ASP.
+* **opc/dpc**: choose values outside production ranges in lab. Keep documentation of point-codes used.
+* **ni**: 0–3 (0 = international? check implementation docs).
 
-Example:
+---
+
+### Example: `/config/openss7/sigtran.cfg`
 
 ```ini
 [general]
 local_ip = 192.168.100.10
-remote_ip = 192.168.100.20
 local_port = 2905
+remote_ip = 192.168.100.20
 remote_port = 2905
 routing_context = 1001
 asp_id = 2001
+
+[m3ua]
+asp_name = TRINETRA_ASP
+as_name = TRINETRA_AS
+
+[logging]
+level = INFO
+logfile = /var/log/openss7/openss7.log
 ```
 
-### 6.3 Trinetra: `config.json` (fields explained)
+**Important:** `routing_context` and `asp_id` must match Trinetra's config.
 
-* **interface** — OS interface name (e.g., `eth0`, `enp3s0`).
-* **enabled\_protocols** — List of decoders to enable (reduce attack surface by enabling only required protocols).
-* **sg\_ip/sg\_port** — Where Trinetra expects the SIGTRAN/M3UA stream.
-* **routing\_context** — Must match `sigtran.cfg`.
+---
 
-Example:
+### Example: `/config/trinetra/config.json`
 
 ```json
 {
   "interface": "eth0",
-  "enabled_protocols": ["ss7","diameter","sip"],
   "sg_ip": "192.168.100.10",
   "sg_port": 2905,
-  "routing_context": 1001
+  "routing_context": 1001,
+  "enabled_protocols": ["ss7","diameter","sip","nas5g","ims","gtp"],
+  "alerts": {
+    "enabled": true,
+    "keywords": ["OTP","password","pin"],
+    "telegram": {"token":"REDACTED","chat_id":"REDACTED"}
+  },
+  "output_format": "json",
+  "logging": {"level":"INFO","path":"/var/log/trinetra/trinetra.log"}
 }
 ```
 
+**Security note:** Never commit real tokens/keys. Use environment variables or secret store when deploying.
+
 ---
 
-## 7. Testing & Validation
+## 8. Integration: OpenSS7 ↔ Trinetra (Detailed Mapping)
 
-### 7.1 Tools
+This section maps OpenSS7 runtime concepts to Trinetra expectations.
 
-* `tcpdump`, ` tshark`, `wireshark` — analyze M3UA/SCTP and raw SS7 PDUs.
-* OpenSS7 tools: `ss7cfg`, `mtptool`, `ss7test` (names vary by repo build).
-* `sngrep` — useful for SIP but not directly for SS7; still handy for multi-protocol labs.
+| OpenSS7                 | Meaning                       | Trinetra mapping                                         |
+| ----------------------- | ----------------------------- | -------------------------------------------------------- |
+| local\_ip / local\_port | SG IP/port for SCTP           | `config.json.sg_ip` / `sg_port`                          |
+| routing\_context        | M3UA routing context          | `config.json.routing_context`                            |
+| asp\_id                 | Application Server Process ID | used to identify ASP in Trinetra's session management    |
+| opc/dpc                 | Point codes for routing       | used by Trinetra to tag messages with origin/destination |
 
-### 7.2 Tests
+**Session lifecycle:**
 
-* **MTP loopback**: test L1-L3 by sending test MTP messages.
-* **M3UA session bring-up**: bring up SCTP association and ensure ASP/AS state becomes ACTIVE.
-* **MAP SMS flow**: simulate MAP `SM-RP` to generate an SMS MAP flow and confirm decode in Trinetra.
-* **ISUP call setup**: simulate IAM/ACM/ANM/REL.
-* **Anomaly detection**: replay invalid SS7 sequences and confirm Trinetra raises alerts.
+1. SCTP association up (SCTP INIT/COOKIE exchange)
+2. M3UA ASP UP / ASP ACTIVE
+3. M3UA data messages containing SS7 payloads (MTP3/MAP/ISUP)
+4. Trinetra decodes PDUs, persists events, raises alerts
 
-### 7.3 Example tcpdump command
+**Operational checks:**
+
+* Ensure SCTP association remains stable — watch `ss` / `netstat -s` for retransmits.
+* If Trinetra loses association, ensure `sigtran.cfg.remote_ip` points to Trinetra's host and firewall allows SCTP.
+
+---
+
+## 9. Testing & Validation (scenarios & commands)
+
+### Tools used
+
+* `tcpdump`, `tshark`, `wireshark` — capture & dissect M3UA/MAP/ISUP PDUs
+* `ss7test`, `mtptool` — OpenSS7 test utilities
+* Trinetra unit tests / `tests/` pcaps in repo
+
+### Example captures
 
 ```bash
-tcpdump -i eth0 sctp and port 2905 -w /tmp/sigtran.pcap
-# open in Wireshark and use display filter: m3ua || sccp || isup || sctp
+# capture SCTP M3UA traffic on port 2905
+sudo tcpdump -i eth0 port 2905 -w /tmp/sigtran_2905.pcap
+
+# open in Wireshark and filter: m3ua || sccp || map || isup
+```
+
+### Test scenarios
+
+1. **M3UA Bring-up** — verify SCTP assoc + ASP states
+2. **MAP SMS Flow** — inject test MAP-SEND\_ROUTING\_INFO/SM-RP and confirm Trinetra decodes IMSI / MSISDN
+3. **ISUP Call Flow** — IAM → ACM → ANM → REL
+4. **Anomaly & Replay** — use `replay.py` to send previously captured PDUs (authorized only)
+5. **Stress Test** — generate an INVITE flood or high-rate MAP to validate system limits and alerting
+
+**Sample commands** (OpenSS7 test harness syntax depends on build):
+
+```bash
+# hypothetical
+/opt/openss7/bin/ss7test --m3ua-bringup --local 192.168.100.10 --remote 192.168.100.20 --port 2905
+/opt/openss7/bin/mtptool --send-map --imsi 123456789012345 --msisdn 919876543210
 ```
 
 ---
 
-## 8. Scaling & Deployment Options
+## 10. Advanced Usage: Replay, Anomaly Injection, Scale
 
-* **VM approach**: Run OpenSS7 in one VM (bridged network), Trinetra in another. Use host-only networks for isolation.
-* **Containerization**: Dockerize OpenSS7 — note SCTP support in Docker requires special host kernel setup (use `--network=host` or `macvlan`).
-* **Distributed lab**: Add multiple SG nodes, an STP simulator, and load balancer to test high-availability.
+### Replay (`replay.py`)
 
-Recommendations:
+* Enforced with `security.py` checks: only authorized user IDs and signed replay manifests allowed.
+* Every replay must create a reversible audit trail and be time-limited.
 
-* Use `systemd` units for OpenSS7 services for predictable restarts.
-* Use `prometheus`/`grafana` for metrics (SCTP associations, message rates, CPU/memory).
+### Anomaly injection
 
----
+* Use test harness to create invalid MTP3 sequences, malformed SCCP headers, unexpected MAP opcodes.
+* Trinetra's `alerts.py` should flag these.
 
-## 9. Security, Compliance & Logging
+### Scale
 
-**Access Controls**
-
-* Use least-privilege accounts; run services under dedicated user (e.g., `openss7`).
-* Restrict SSH and enable key-based login.
-
-**Network Security**
-
-* Firewall rules to allow only Trinetra-IP to connect over SCTP/TCP ports.
-* Use VLANs for test network separation.
-
-**Logging**
-
-* Centralize logs to an ELK/Graylog stack. Rotate logs daily.
-* Maintain 90-day encrypted archives for forensic requirements.
-
-**Compliance**
-
-* For any lawful interception research, hold documented authorization and MoUs with the telecom operator or supervising authority.
+* For larger labs, deploy OpenSS7 as containerized services on multiple hosts. Use load balancers for M3UA endpoints (L4) and STP-like routing logic to distribute traffic.
+* Centralize Trinetra collectors to a message queue (Kafka) for horizontal decoder workers.
 
 ---
 
-## 10. Troubleshooting & Common Errors
+## 11. Security Hardening & Compliance Checklist
 
-* **SCTP association fails**: Confirm IPs, firewall, `sctp` kernel module and port availability.
-* **OpenSS7 build errors**: Missing `autoconf`/`automake`/`libtool` packages — install `autoconf automake libtool pkg-config`.
-* **Point code routing issues**: Validate `opc/dpc` and `ni`; use `ss7cfg show` to inspect routing tables.
-* **Trinetra decode failures**: Confirm `enabled_protocols`, matching routing\_context, and check capture for correct SI (service indicator).
+1. **Network**
+
+   * Isolate lab VLAN
+   * Restrict SCTP/TCP ports to authorized hosts only
+2. **Host**
+
+   * Harden kernel: disable unused netfilter modules
+   * Keep system patched
+3. **Process**
+
+   * Run services as non-root users where possible
+   * Use `setcap` to grant raw socket capabilities to Python binary if avoiding root
+4. **Secrets**
+
+   * Use env vars or vault for tokens
+5. **Logging**
+
+   * Immutable audit logs (append-only), signed daily
+6. **Legal**
+
+   * Maintain explicit authorizations (signed), duration, and scope
+
+Checklist artifact: `/docs/compliance_checklist.md`
 
 ---
 
-## 11. Maintenance & Upgrades
+## 12. Logging, Auditing & Forensics
 
-* `git pull` OpenSS7 repo and re-run `./configure && make && sudo make install` in staging first.
-* Back up `/etc/openss7` and Trinetra config before major changes.
-* Schedule kernel upgrades with rollback plan — SCTP kernel changes may break existing associations.
+Trinetra and OpenSS7 logs should be aggregated to a central system (ELK, Graylog):
+
+* `trinetra.log` — human readable
+* `trinetra.json` — structured events
+* `trinetra.db` — SQLite for GUI queries
+* `openss7.log` — stack logs
+
+Ensure time sync (`chrony`/`ntp`) and apply digital signatures to daily log bundles (`gpg --detach-sign`) to provide tamper-evidence.
 
 ---
 
-## 12. File & Repo Structure
+## 13. Troubleshooting Guide (Diagnostics & Fixes)
+
+**SCTP assoc fails**
+
+* `ss -s` to view SCTP stats
+* `sudo tcpdump -i eth0 sctp and port 2905` to capture INIT/COOKIE exchanges
+* Check firewall / iptables / ufw rules
+
+**OpenSS7 build failures**
+
+* Missing autotools: `sudo apt install autoconf automake libtool pkg-config`
+* Ensure you have kernel headers matching running kernel
+
+**Trinetra decoder no output**
+
+* Confirm `config.json.enabled_protocols` includes `ss7`
+* Check mapping of `routing_context` and `opc/dpc` in captures
+
+**High CPU**
+
+* Reduce `enabled_protocols` and apply sampling on heavy protocols (e.g., GTP-U)
+
+---
+
+## 14. File & Repo Layout (Recommended)
 
 ```
-/README.md            # This file
-/diagrams/            # Mermaid files + exported PNGs (optional)
-/config/               # sample config files
-  openss7/ss7.cfg
-  openss7/sigtran.cfg
-  trinetra/config.json
-/scripts/              # helper scripts for bring-up and testing
-  start_openss7.sh
-  start_trinetra.sh
-/tests/                # test cases and pcap samples
-  map_sms.pcap
-  isup_call.pcap
+Trinetra-Bridge-Repo/
+├── README.md  # this file
+├── LICENSE
+├── config/
+│   ├── openss7/ss7.cfg
+│   ├── openss7/sigtran.cfg
+│   └── trinetra/config.json
+├── diagrams/
+│   ├── architecture.mmd
+│   └── seq_map_sms.mmd
+├── scripts/
+│   ├── start_openss7.sh
+│   ├── start_trinetra.sh
+│   └── export_diagrams.sh
+├── tests/
+│   ├── pcaps/
+│   └── unit/
+└── docs/
+    └── compliance_checklist.md
 ```
+
+Include a `LICENSE` (Python License header suggested by Trinetra), and make sure `config/` contains sample, sanitized configs only.
 
 ---
 
-## 13. Diagrams
+## 15. Diagrams (Mermaid + ASCII)
 
-Below are multiple diagram styles to help visualize architecture, flows and deployment. They are provided as Mermaid blocks so they render in GitHub and are easy to adjust.
-
-### 13.1 Architecture Diagram (High-level)
+### Architecture (mermaid)
 
 ```mermaid
 flowchart LR
-  subgraph LAB [Lab Node]
-    A[OpenSS7 (SG)] -->|M3UA over SCTP| B[Trinetra Collector]
-    B --> C[(Decoder & Storage)]
-    C --> D[GUI / Alerts]
+  subgraph LAB
+    SG[OpenSS7 - SG (M3UA over SCTP)] -->|M3UA (SCTP 2905)| TR[Trinetra Collector]
+    TR --> DB[(DB - trinetra.db & PCAP Storage)]
+    TR --> GUI[Trinetra GUI / REST API]
   end
   subgraph ADMIN
-    E[Operator Workstation] -->|SSH / HTTPS| B
+    OP[Operator Workstation] -->|HTTPS/SSH| GUI
   end
-  style LAB fill:#f8f9fa,stroke:#333,stroke-width:1px
 ```
 
-**What it shows:** Single laptop running OpenSS7 acting as SG, Trinetra receiving M3UA over SCTP, decoding and storing messages, GUI for operator.
-
-### 13.2 Component Breakdown (Modules & Ports)
-
-```mermaid
-graph TD
-  SG[OpenSS7 SG]
-  SG -->|SCTP:2905| TR[Trinetra Listener]
-  TR --> DECODER[Decoder Pipeline]
-  DECODER --> DB[(Timeseries & PCAP Storage)]
-  TR --> GUI[Web GUI]
-  SG --> TEST[ss7test / mtptool]
-```
-
-### 13.3 Sequence Diagram: SS7 Message Flow (M3UA + MAP SMS)
+### Sequence: MAP SMS flow
 
 ```mermaid
 sequenceDiagram
@@ -304,82 +427,119 @@ sequenceDiagram
   TR->>SG: SCTP COOKIE ACK / DATA
   SG->>TR: M3UA ASP-UP
   TR->>SG: M3UA ASP-ACCEPT
-  SG->>TR: M3UA MAP: SendRoutingInfoForSM
-  TR->>DB: Store decoded MAP SMS
-  TR->>GUI: Update live view & trigger alert (if rule matches)
+  SG->>TR: M3UA (MTP3 + MAP SendRoutingInfoForSM)
+  TR->>DB: persist event (map_sms)
+  TR->>GUI: render SMS event & raise OTP alert if matched
 ```
 
-### 13.4 Deployment Topology (ASCII)
+### ASCII Topology
 
 ```
-+-----------------------------+        +------------------+
-|  Ryzen3 Laptop (Host)       |        |  Admin Workstation|
-|  - OpenSS7 (SG)             |<------>|  - Web GUI        |
-|  - /etc/openss7/*           |  SCTP  |  - SSH/HTTPS      |
-+-----------------------------+ 2905   +------------------+
++---------------------------+        +-------------------------+
+|  Ryzen3 Laptop (Host)     |        |  Admin Workstation      |
+|  - OpenSS7 (SG)           | <----> |  - GUI (HTTPS)         |
+|  - /etc/openss7/*         |  SCTP  |  - Operator            |
++---------------------------+ 2905   +-------------------------+
            |
-           | (optional virtual links / VM bridge)
            v
-   +------------------+
-   |  Trinetra (local)|
-   |  - Decoder       |
-   |  - DB/PCAP store |
-   +------------------+
+   +-----------------------+
+   |  Trinetra Collector   |
+   |  - Decoders           |
+   |  - Alerts & DB        |
+   +-----------------------+
 ```
 
 ---
 
-## 14. Exporting Diagrams to PNG / SVG
+## 16. Exporting Diagrams & Automation
 
-To export Mermaid diagrams locally to PNG/SVG, use `mmdc` (Mermaid CLI) or `mermaid-cli`:
-
-### Using npx (Node.js required)
+Use Mermaid CLI or Docker images to export `.mmd` files to PNG/SVG. Example script included in `scripts/export_diagrams.sh`:
 
 ```bash
-# install once globally or use npx
-npx @mermaid-js/mermaid-cli -i diagrams/architecture.mmd -o diagrams/architecture.png
-```
-
-### Using Docker (if no Node)
-
-```bash
-docker run --rm -v $(pwd)/diagrams:/data minlag/mermaid-cli -i /data/architecture.mmd -o /data/architecture.png
-```
-
-### Quick export script (example)
-
-```bash
-#!/bin/bash
+#!/usr/bin/env bash
+set -e
 mkdir -p diagrams/export
-echo "generating PNGs..."
-npx @mermaid-js/mermaid-cli -i README.mmd -o diagrams/export/README.png || true
+npx @mermaid-js/mermaid-cli -i diagrams/architecture.mmd -o diagrams/export/architecture.png
+npx @mermaid-js/mermaid-cli -i diagrams/seq_map_sms.mmd -o diagrams/export/seq_map_sms.png
 ```
 
-> Tip: Save each Mermaid block as its own `.mmd` file to export specific diagrams easily.
+If Node is not available, use Docker-based mermaid-cli container.
 
 ---
 
-## 15. References
+## 17. References & Useful Links
 
-(Keep the numbered references used in the original guidance and add more authoritative docs)
-
-* OpenSS7 project & manuals
-* SIGTRAN RFCs (RFC 3332, RFC 4666 for M3UA, RFC 3436)
-* Wireshark dissectors docs
-* Trinetra internal docs (if available in your org)
+* OpenSS7 GitHub: [https://github.com/openss7/openss7](https://github.com/openss7/openss7)
+* OpenSS7 manuals and STREAMS docs
+* RFCs: M3UA (RFC 4666), SIGTRAN family
+* Wireshark dissector docs for M3UA/SCCP/MAP/ISUP
+* Trinetra repository and protocol docs (internal)
 
 ---
 
-## 16. Legal Disclaimer
+## 18. Legal & Ethical Disclaimer
 
-This repository is for authorized research and educational use only. Unauthorized interception of telecom signaling and connecting to production telco networks is illegal. Keep all experiments within an isolated and authorized lab.
+This repository and the tools described are strictly for **authorized**, **lawful**, and **ethical** use. Unauthorized interception or tampering with live telecom infrastructure is illegal in most jurisdictions. Before using any of these tools outside of an isolated lab, obtain explicit, written authorization from the operator and legal counsel.
+
+---
+
+## 19. Appendix: Sample Config Files
+
+The following example configs are sanitized and intended only for lab use.
+
+### `config/openss7/ss7.cfg` (sanitized)
+
+```ini
+[point_codes]
+opc = 1
+dpc = 2
+ni  = 2
+
+[linksets]
+lab = { type = virtual; links = ["vlink0"] }
+```
+
+### `config/openss7/sigtran.cfg`
+
+```ini
+[general]
+local_ip = 192.168.100.10
+local_port = 2905
+remote_ip = 192.168.100.20
+remote_port = 2905
+routing_context = 1001
+asp_id = 2001
+
+[logging]
+level = INFO
+logfile = /var/log/openss7/openss7.log
+```
+
+### `config/trinetra/config.json`
+
+```json
+{
+  "interface": "eth0",
+  "sg_ip": "192.168.100.10",
+  "sg_port": 2905,
+  "routing_context": 1001,
+  "enabled_protocols": ["ss7","diameter","sip","nas5g","ims","gtp"],
+  "alerts": {"enabled": true, "keywords": ["OTP","password"]},
+  "output_format": "json",
+  "logging": {"level":"INFO","path":"/var/log/trinetra/trinetra.log"}
+}
+```
 
 ---
 
 ### Final notes
 
-* This README is formatted to be GitHub-ready. The `diagrams/` folder should contain Mermaid `.mmd` files and exported PNGs. Keep `config/` sanitized (do not commit real credentials or live point-codes).
+* The README has been expanded to include **Trinetra-specific operational mappings** and a stronger set of **security, testing and compliance** guidance.
+* Next steps I can take for you (I can do one or more):
 
----
+  1. **Generate sanitized sample files** for the repo (`config/`, `scripts/`, `diagrams/`) and commit-ready content.
+  2. **Export the Mermaid diagrams** to PNGs and attach them to the repo.
+  3. **Create a one-page PPT** for your Maharashtra meeting summarizing architecture, legal controls and PoC steps.
+  4. **Produce an infrastructure-as-code script** (Ansible playbook / Docker compose) to bootstrap the lab.
 
-*End of README.*
+Tell me which of the above you want next and I’ll proceed — I already prepared the README update and saved it in the canvas.
